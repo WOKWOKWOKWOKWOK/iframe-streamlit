@@ -1,31 +1,32 @@
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
+from duckduckgo_search import DDGS
 
-st.title("Web Scraper Preview")
+st.set_page_col_config = {"layout": "wide"}
+st.title("🌐 Fully Unblocked Search Engine")
+st.write("Search the web directly inside this app without iframe blocks or restrictions.")
 
-target_url = "https://google.com"  # Change this to your URL
+# 1. Search input bar
+search_query = st.text_input("Enter your search query:", placeholder="Type something here...")
 
-# 1. Add headers to look like a real browser (fixes 90% of blocking issues)
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
-
-try:
-    response = requests.get(target_url, headers=headers, timeout=10)
-    soup = BeautifulSoup(response.text, 'html.parser')
-
-    # 2. Look for the title safely
-    heading_element = soup.find('h1')
-
-    # 3. Add a fallback check so the app never crashes
-    if heading_element:
-        headline = heading_element.text.strip()
-        st.success(f"Latest Update from Site: **{headline}**")
-    else:
-        # Fallback to the main webpage title if <h1> isn't found
-        page_title = soup.title.text if soup.title else "No title found"
-        st.warning(f"Could not find an H1 tag. Webpage title is: **{page_title}**")
-
-except Exception as e:
-    st.error(f"Failed to connect to the website: {e}")
+if search_query:
+    st.write(f"### Results for: *{search_query}*")
+    
+    with st.spinner("Searching the web safely..."):
+        try:
+            # 2. Fetch unblocked results using the DuckDuckGo backend API
+            with DDGS() as ddgs:
+                results = [r for r in ddgs.text(search_query, max_results=10)]
+            
+            # 3. Render results cleanly in Streamlit layout
+            if results:
+                for idx, result in enumerate(results):
+                    # Boxed container for each search result
+                    with st.container(border=True):
+                        st.markdown(f"### [{result['title']}]({result['href']})")
+                        st.caption(f"🔗 {result['href']}")
+                        st.write(result['body'])
+            else:
+                st.warning("No results found for this query.")
+                
+        except Exception as e:
+            st.error(f"Search error: {e}. Please try again.")
