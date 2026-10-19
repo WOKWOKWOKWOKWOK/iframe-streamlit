@@ -79,4 +79,6 @@ with col2:
             except Exception as e:
                 st.error(f"Failed to fetch site content: {e}")
     else:
-        st.gray("Click 'Read Directly inside App' on any search result to view its content here.")
+            else:
+        # Changed st.gray to st.info so the code runs perfectly
+        st.info("Click 'Read Directly inside App' on any search result to view its content here.")
