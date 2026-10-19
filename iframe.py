@@ -1,109 +1,114 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
+import urllib.parse
+from duckduckgo_search import DDGS
 
-# Maximize layout for a realistic browser viewport experience
-st.set_page_config(layout="wide", page_title="Streamlit Web Browser", page_icon="🌐")
+st.set_page_config(layout="wide", page_title="Web Portal", page_icon="🌐")
 
-# Custom CSS styling to make the interface look exactly like a desktop browser
+# Custom CSS to hide default headers, center elements, and style the search experience
 st.markdown("""
     <style>
-    .block-container {padding-top: 1rem; padding-bottom: 0rem; padding-left: 1rem; padding-right: 1rem;}
-    div[data-testid="stForm"] {border: 1px solid #30363d; border-radius: 10px; background-color: #0d1117; padding: 10px;}
-    iframe {border: 1px solid #30363d; border-radius: 6px; background-color: white;}
+    .block-container {padding: 1.5rem 2rem;}
+    [data-testid="stHeader"] {display: none;}
+    footer {visibility: hidden;}
+    
+    /* Google-style search aesthetics */
+    .google-title {
+        font-family: 'Product Sans', Arial, sans-serif;
+        font-size: 80px;
+        font-weight: bold;
+        text-align: center;
+        margin-top: 8% !important;
+        margin-bottom: 25px !important;
+        letter-spacing: -2px;
+    }
+    iframe {border: 1px solid #30363d; border-radius: 8px; background-color: white;}
     </style>
 """, unsafe_allow_html=True)
 
-# 1. Initialize Browser State Memory
-HOME_PAGE = "https://wikipedia.org"
+# 1. State Management for Browsing Mode
+if "active_url" not in st.session_state:
+    st.session_state.active_url = None
 
-if "history" not in st.session_state:
-    st.session_state.history = [HOME_PAGE]
-if "history_index" not in st.session_state:
-    st.session_state.history_index = 0
-
-current_url = st.session_state.history[st.session_state.history_index]
-
-# 2. Browser Navigation Controls (Top Ribbon)
-st.title("🌐 Streamlit Cloud Browser")
-
-# Create a sleek grid for navigation buttons and the address bar
-nav_col1, nav_col2, nav_col3, nav_col4 = st.columns([1, 1, 1, 12])
-
-with nav_col1:
-    # Disable Back button if we are at the beginning of history
-    back_disabled = st.session_state.history_index == 0
-    if st.button("⬅️", disabled=back_disabled, help="Back"):
-        st.session_state.history_index -= 1
-        st.rerun()
-
-with nav_col2:
-    # Disable Forward button if we are at the newest page
-    forward_disabled = st.session_state.history_index == len(st.session_state.history) - 1
-    if st.button("➡️", disabled=forward_disabled, help="Forward"):
-        st.session_state.history_index += 1
-        st.rerun()
-
-with nav_col3:
-    if st.button("🏠", help="Home"):
-        # Append Home to history stack
-        if st.session_state.history[-1] != HOME_PAGE:
-            st.session_state.history = st.session_state.history[:st.session_state.history_index + 1]
-            st.session_state.history.append(HOME_PAGE)
-            st.session_state.history_index = len(st.session_state.history) - 1
-        st.rerun()
-
-# Use a form wrapper so hitting "Enter" in the address bar acts like a real browser search
-with nav_col4:
-    with st.form("url_form", clear_on_submit=False):
-        url_input = st.text_input(
-            "Address Bar",
-            value=current_url,
-            label_visibility="collapsed",
-            placeholder="Type a URL (e.g., https://utopia.de) and press Enter..."
+# --- MODE A: THE LANDING PAGE (Google Search UI) ---
+if st.session_state.active_url is None:
+    # Render stylized Google Title
+    st.markdown('<h1 class="google-title"><span style="color:#4285F4">G</span><span style="color:#EA4335">o</span><span style="color:#FBBC05">o</span><span style="color:#4285F4">g</span><span style="color:#34A853">l</span><span style="color:#EA4335">e</span></h1>', unsafe_allow_html=True)
+    
+    # Central Search Input Box
+    with st.form("search_form", clear_on_submit=True):
+        user_input = st.text_input(
+            "Search Input",
+            placeholder="Search the web or type a URL...",
+            label_visibility="collapsed"
         )
-        submit_btn = st.form_submit_button("Go", use_container_width=True)
+        submit_search = st.form_submit_button("Search / Go", use_container_width=True)
         
-        if submit_btn and url_input:
-            # Clean URL format automatically
-            if not url_input.startswith(("http://", "https://")):
-                url_input = "https://" + url_input
+        if submit_search and user_input.strip():
+            query = user_input.strip()
             
-            # If the user typed a new URL, wipe out forward history and add it to stack
-            if url_input != current_url:
-                st.session_state.history = st.session_state.history[:st.session_state.history_index + 1]
-                st.session_state.history.append(url_input)
-                st.session_state.history_index = len(st.session_state.history) - 1
-                st.rerun()
-
-# 3. Server-Side Rendering Core Engine
-with st.spinner(f"Loading {current_url}..."):
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-        # Fetch the site through Streamlit Cloud infrastructure safely
-        response = requests.get(current_url, headers=headers, timeout=12)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Inject <base> tag so internal stylesheets and images evaluate relative to the source site
-        if not soup.find('base'):
-            base_tag = soup.new_tag('base', href=current_url)
-            if soup.head:
-                soup.head.insert(0, base_tag)
+            # Smart Detection: Is it a direct URL link or a text search phrase?
+            if any(query.endswith(ext) for ext in ['.com', '.org', '.net', '.edu', '.de', '.io', '.html']) or query.startswith(('http://', 'https://')):
+                if not query.startswith(('http://', 'https://')):
+                    query = "https://" + query
+                st.session_state.active_url = query
             else:
-                soup.insert(0, base_tag)
-        
-        # Kill heavy analytics script structures that break local framing layout logic
-        for element in soup(["script"]):
-            element.decompose()
+                # If it's a word/phrase, pass it to an unblocked internal search processing page
+                encoded_query = urllib.parse.quote_plus(query)
+                st.session_state.active_url = f"INTERNAL_SEARCH://{encoded_query}"
+            st.rerun()
 
-        render_html = str(soup)
+# --- MODE B: THE LIVE APP VIEWPORT (Hides search widgets completely) ---
+else:
+    # Small top utility anchor to let users exit back to the browser homepage
+    col_back, _ = st.columns([1, 10])
+    with col_back:
+        if st.button("🏠 Home", use_container_width=True):
+            st.session_state.active_url = None
+            st.rerun()
+            
+    current_target = st.session_state.active_url
+
+    # Handle internal search pages dynamically
+    if current_target.startswith("INTERNAL_SEARCH://"):
+        raw_query = urllib.parse.unquote_plus(current_target.replace("INTERNAL_SEARCH://", ""))
+        st.subheader(f"🔍 Web Results for: {raw_query}")
         
-        # 4. Viewport Output
-        st.components.v1.html(render_html, height=750, scrolling=True)
-        
-    except Exception as e:
-        st.error(f"⚠️ Browser Connection Error: {e}")
-        st.warning("Make sure the address is completely correct and includes a real extension (like .org, .de, .com).")
+        with st.spinner("Retrieving unblocked sources..."):
+            try:
+                with DDGS() as ddgs:
+                    search_results = [r for r in ddgs.text(raw_query, max_results=10)]
+                
+                if search_results:
+                    for result in search_results:
+                        with st.container(border=True):
+                            # Clicking title opens it safely directly inside your frame state
+                            if st.button(result['title'], key=result['href']):
+                                st.session_state.active_url = result['href']
+                                st.rerun()
+                            st.caption(f"🔗 {result['href']}")
+                            st.write(result['body'])
+                else:
+                    st.warning("No indices found.")
+            except Exception as e:
+                st.error(f"Search API Error: {e}")
+                
+    # Handle real-time proxy layout rendering for links
+    else:
+        with st.spinner(f"Navigating to web workspace..."):
+            try:
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                response = requests.get(current_target, headers=headers, timeout=12)
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Base adjustment for absolute link matching layout rules
+                if not soup.find('base'):
+                    soup.insert(0, soup.new_tag('base', href=current_target))
+                for s in soup(["script"]):
+                    s.decompose()
+                
+                # Full frame canvas display
+                st.components.v1.html(str(soup), height=850, scrolling=True)
+            except Exception as e:
+                st.error(f"Failed to securely render resource: {e}")
