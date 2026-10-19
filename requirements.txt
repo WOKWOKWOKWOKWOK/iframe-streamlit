@@ -1,5 +1,3 @@
-beautifulsoup4
-requests
-streamlit
 streamlit
 duckduckgo_search
+beautifulsoup4
