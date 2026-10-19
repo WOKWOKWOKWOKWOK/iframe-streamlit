@@ -1,12 +1,17 @@
 import streamlit as st
+import streamlit.components.v1 as components
 
-st.title("Unblocked Iframe Website")
+st.title("Advanced Unblocked Iframe")
 
-# The website that usually blocks iframes (e.g., wikipedia or a news site)
-target_url = "https://google.com" 
+target_url = "https://google.com"
 
-# Route it through the allorigins proxy wrapper
-unblocked_url = f"https://allorigins.win{target_url}"
+# Custom HTML that loads the unblocker scripts and injects the modified iframe
+iframe_html = f"""
+<script src="https://unpkg.com"></script>
+<script type="module" src="https://unpkg.com"></script>
 
-# Render the unblocked site
-st.iframe(unblocked_url, height=700)
+<iframe is="x-frame-bypass" src="{target_url}" style="width:100%; height:100%; border:none;"></iframe>
+"""
+
+# Render the HTML component inside Streamlit
+components.html(iframe_html, height=700)
