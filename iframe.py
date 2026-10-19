@@ -1,6 +1,12 @@
 import streamlit as st
+import requests
+from bs4 import BeautifulSoup
 
-st.subheader("External Resource")
+# Fetch the site data from the backend server instead of the frontend browser
+response = requests.get("https://google.com")
+soup = BeautifulSoup(response.text, 'html.parser')
 
-# Creates a native, responsive button that opens the site safely
-st.link_button("Open Website", "https://google.com")
+# Grab a specific headline or text block
+headline = soup.find('h1').text
+
+st.write(f"Latest Update from Site: **{headline}**")
