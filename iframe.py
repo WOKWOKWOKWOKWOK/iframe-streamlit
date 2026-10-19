@@ -3,7 +3,7 @@ import streamlit.components.v1 as components
 
 st.title("Advanced Unblocked Iframe")
 
-target_url = "https://google.com"
+target_url = "https://crazygames.com"
 
 # Custom HTML that loads the unblocker scripts and injects the modified iframe
 iframe_html = f"""
