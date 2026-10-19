@@ -1,9 +1,12 @@
 import streamlit as st
 
-st.title("My App with an Embedded Website")
+st.title("Unblocked Iframe Website")
 
-# Paste the URL of the site you want to display inside your Streamlit app
-target_url = "https://crazygames.com"
+# The website that usually blocks iframes (e.g., wikipedia or a news site)
+target_url = "https://google.com" 
 
-# Render the iframe
-st.iframe(target_url, height=600)
+# Route it through the allorigins proxy wrapper
+unblocked_url = f"https://allorigins.win{target_url}"
+
+# Render the unblocked site
+st.iframe(unblocked_url, height=700)
