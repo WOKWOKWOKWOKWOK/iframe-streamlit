@@ -1,200 +1,75 @@
-from collections import Counter, defaultdict
-import math
-import re
+import streamlit as st
+from supabase import create_client, Client
 
+st.set_page_config(page_title="Bookmark Search", page_icon="🔖", layout="centered")
 
-class SearchEngine:
+# Initialize Supabase connection
+@st.cache_resource
+def init_supabase() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
-  def __init__(self):
-    self.documents = {}  # doc_id -> raw document details
-    self.inverted_index = defaultdict(
-        list
-    )  # word -> list of (doc_id, term_frequency)
-    self.doc_lengths = {}  # doc_id -> token count
-    self.doc_vectors = {}  # doc_id -> {word: tfidf_score}
-    self.idf = {}  # word -> idf_score
+supabase = init_supabase()
 
-  def tokenize(self, text):
-    """Clean text, convert to lowercase, and split into words."""
-    words = re.findall(r"\b\w+\b", text.lower())
+st.title("🔖 Bookmark Search Engine")
 
-    # Stop words to filter out common noisy words
-    stop_words = {
-        "the",
-        "is",
-        "at",
-        "which",
-        "on",
-        "a",
-        "an",
-        "and",
-        "or",
-        "in",
-        "to",
-        "for",
-        "of",
-        "with",
-        "it",
-        "that",
-        "this",
-        "by",
-        "from",
-        "be",
-        "are",
-        "was",
-    }
-    return [w for w in words if w not in stop_words and not w.isdigit()]
+# --- Sidebar: Add New Bookmark ---
+with st.sidebar:
+    st.header("Add New Bookmark")
+    with st.form("add_bookmark_form", clear_on_submit=True):
+        title = st.text_input("Title")
+        url = st.text_input("URL")
+        category = st.text_input("Category")
+        submitted = st.form_submit_button("Save Bookmark")
 
-  def add_document(self, doc_id, title, content):
-    """Add a document to the search database."""
-    self.documents[doc_id] = {"title": title, "content": content}
+        if submitted:
+            if title and url:
+                supabase.table("bookmarks").insert({
+                    "title": title,
+                    "url": url,
+                    "category": category
+                }).execute()
+                st.success("Bookmark saved!")
+                st.rerun()
+            else:
+                st.warning("Please enter both a title and a URL.")
 
-    # Combine title and content (giving extra weight to title)
-    full_text = f"{title} {title} {content}"
-    tokens = self.tokenize(full_text)
-    self.doc_lengths[doc_id] = len(tokens)
+# --- Search Bar ---
+search_query = st.text_input("🔍 Search bookmarks by title, URL, or category...", "")
 
-    # Record term counts for inverted index
-    term_counts = Counter(tokens)
-    for term, count in term_counts.items():
-      self.inverted_index[term].append((doc_id, count))
+# Query database based on schema (id, title, url, category, created_at)
+if search_query.strip():
+    response = (
+        supabase.table("bookmarks")
+        .select("*")
+        .or_(f"title.ilike.%{search_query}%,url.ilike.%{search_query}%,category.ilike.%{search_query}%")
+        .order("created_at", desc=True)
+        .execute()
+    )
+else:
+    response = (
+        supabase.table("bookmarks")
+        .select("*")
+        .order("created_at", desc=True)
+        .execute()
+    )
 
-  def build_index(self):
-    """Compute IDF weights and document vectors for search scoring."""
-    num_docs = len(self.documents)
-    if num_docs == 0:
-      return
+bookmarks = response.data
 
-    # 1. Compute Inverse Document Frequency (IDF)
-    for term, postings in self.inverted_index.items():
-      doc_count = len(postings)
-      self.idf[term] = math.log((num_docs + 1) / (doc_count + 1)) + 1
+st.write(f"**Found {len(bookmarks)} bookmark(s)**")
 
-    # 2. Compute TF-IDF vectors for documents
-    for term, postings in self.inverted_index.items():
-      for doc_id, count in postings:
-        tf = count / self.doc_lengths[doc_id]
-        tfidf = tf * self.idf[term]
-
-        if doc_id not in self.doc_vectors:
-          self.doc_vectors[doc_id] = {}
-        self.doc_vectors[doc_id][term] = tfidf
-
-  def search(self, query, top_k=5):
-    """Search for a query and return top ranked results."""
-    query_tokens = self.tokenize(query)
-    if not query_tokens:
-      return []
-
-    # Calculate query vector (TF-IDF)
-    query_counts = Counter(query_tokens)
-    query_len = len(query_tokens)
-    query_vector = {}
-
-    for term, count in query_counts.items():
-      if term in self.idf:
-        tf = count / query_len
-        query_vector[term] = tf * self.idf[term]
-
-    if not query_vector:
-      return []
-
-    # Cosine similarity scoring against indexed documents
-    scores = defaultdict(float)
-    query_norm = math.sqrt(sum(val**2 for val in query_vector.values()))
-
-    for term, q_tfidf in query_vector.items():
-      for doc_id, _ in self.inverted_index.get(term, []):
-        doc_tfidf = self.doc_vectors[doc_id].get(term, 0)
-        scores[doc_id] += q_tfidf * doc_tfidf
-
-    # Normalize by document magnitude
-    results = []
-    for doc_id, raw_score in scores.items():
-      doc_norm = math.sqrt(
-          sum(val**2 for val in self.doc_vectors[doc_id].values())
-      )
-      if doc_norm > 0 and query_norm > 0:
-        similarity = raw_score / (doc_norm * query_norm)
-        results.append((doc_id, similarity))
-
-    # Sort results by similarity score descending
-    results.sort(key=lambda x: x[1], reverse=True)
-    return results[:top_k]
-
-
-# ==========================================
-# Example Usage / Interactive CLI Setup
-# ==========================================
-if __name__ == "__main__":
-  engine = SearchEngine()
-
-  # Sample document index
-  sample_docs = [
-      (
-          1,
-          "Python Programming Language",
-          "Python is an interpreted, high-level, general-purpose programming"
-          " language. It is widely used in data science, web development, and"
-          " AI.",
-      ),
-      (
-          2,
-          "CSS Shadow and Box Styling",
-          "In CSS, box-shadow and drop-shadow are properties used to add shadow"
-          " effects around an element's frame or content.",
-      ),
-      (
-          3,
-          "Artificial Intelligence and Machine Learning",
-          "Machine learning is a branch of artificial intelligence focused on"
-          " building applications that learn from data and improve accuracy"
-          " over time.",
-      ),
-      (
-          4,
-          "Web Crawling and Search Engines",
-          "Search engines use web crawlers to discover content, build indexes"
-          " with TF-IDF algorithms, and return relevant web pages.",
-      ),
-      (
-          5,
-          "Shadows in 3D Computer Graphics",
-          "3D rendering engines calculate ray tracing and shadow maps to simulate"
-          " realistic light, dark shadows, and reflection effects.",
-      ),
-  ]
-
-  print("Indexing sample documents...")
-  for doc_id, title, content in sample_docs:
-    engine.add_document(doc_id, title, content)
-
-  # Finalize internal calculations
-  engine.build_index()
-  print("Indexing complete!\n")
-
-  print("=== Mini Python Search Engine ===")
-  print("Type a search query (or type 'exit' to quit):\n")
-
-  while True:
-    query = input("Search > ").strip()
-    if query.lower() in ("exit", "quit", "q"):
-      break
-    if not query:
-      continue
-
-    results = engine.search(query)
-
-    if not results:
-      print("No matching documents found.\n")
-      continue
-
-    print(f"\nTop results for '{query}':")
-    print("-" * 50)
-    for rank, (doc_id, score) in enumerate(results, start=1):
-      doc = engine.documents[doc_id]
-      percentage = round(score * 100, 1)
-      print(f"[{rank}] {doc['title']} (Relevance Score: {percentage}%)")
-      print(f"    Snippet: {doc['content'][:110]}...")
-      print("-" * 50)
-    print()
+# --- Display Results ---
+for item in bookmarks:
+    with st.container():
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.markdown(f"### [{item['title']}]({item['url']})")
+            cat = item.get("category") if item.get("category") else "Uncategorized"
+            created = item.get("created_at", "")[:10]
+            st.caption(f"📁 Category: **{cat}** | 📅 Added: {created}")
+        with col2:
+            if st.button("Delete", key=f"del_{item['id']}"):
+                supabase.table("bookmarks").delete().eq("id", item["id"]).execute()
+                st.rerun()
+    st.divider()
