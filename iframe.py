@@ -1,51 +1,41 @@
 import streamlit as st
-import requests
-import json
+from supabase import create_client, Client
 
-st.set_page_config(layout="wide", title="Cloud VM Manager")
+# 1. Connect to Supabase using secrets
+url: str = st.secrets["SUPABASE_URL"]
+key: str = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(url, key)
 
-# Enter your Cloud Platform API token safely here or via st.secrets
-# This example uses DigitalOcean's straightforward API to spin up an Ubuntu Droplet
-API_TOKEN = st.text_input("Enter your Provider API Token:", type="password")
+st.title("🌐 My Personal Web Hub")
 
-st.title("🚀 Custom Ubuntu VM Provisioner")
-st.write("Configure and deploy a cloud VM instantly.")
+# 2. Sidebar to add new links
+st.sidebar.header("Add New Link")
+new_title = st.sidebar.text_input("Site Title")
+new_url = st.sidebar.text_input("URL (https://...)")
+new_cat = st.sidebar.selectbox("Category", ["Work", "Entertainment", "News", "Tech"])
 
-col1, col2 = st.columns(2)
-with col1:
-    vm_name = st.text_input("Instance Name", value="streamlit-ubuntu-node")
-    region = st.selectbox("Data Center Region", ["nyc1", "sfo3", "ams3", "fra1"])
+if st.sidebar.button("Save Link"):
+    if new_title and new_url:
+        data = {"title": new_title, "url": new_url, "category": new_cat}
+        supabase.table("bookmarks").insert(data).execute()
+        st.sidebar.success("Saved!")
+        st.rerun()
 
-with col2:
-    ubuntu_version = st.selectbox("Ubuntu Base Image", ["ubuntu-24-04-x64", "ubuntu-22-04-x64"])
-    size_slug = st.selectbox("Hardware Size", ["s-1vcpu-1gb", "s-1vcpu-2gb", "s-2vcpu-4gb"])
+# 3. Main Dashboard: Search and Browse
+search_query = st.text_input("🔍 Search my browser links...", "")
 
-if st.button("Deploy Live VM Instance", type="primary"):
-    if not API_TOKEN:
-        st.error("Please provide a valid API authentication token first.")
-    else:
-        with st.spinner("Provisioning your Ubuntu environment on the cloud..."):
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {API_TOKEN}"
-            }
-            payload = {
-                "name": vm_name,
-                "region": region,
-                "size": size_slug,
-                "image": ubuntu_version,
-                "backups": False,
-                "ipv6": True
-            }
-            
-            # API endpoint to launch a virtual instance
-            url = "https://digitalocean.com"
-            response = requests.post(url, headers=headers, json=payload)
-            
-            if response.status_code == 202:
-                data = response.json()
-                st.success(f"Successfully created droplet! ID: {data['droplet']['id']}")
-                st.info("The server is spinning up. Give it ~60 seconds to fetch your public IP address.")
-                st.json(data['droplet'])
-            else:
-                st.error(f"Failed to create instance: {response.text}")
+# Fetch data from Supabase
+response = supabase.table("bookmarks").select("*").execute()
+links = response.data
+
+# Filter links based on search
+if search_query:
+    links = [l for l in links if search_query.lower() in l['title'].lower() or search_query.lower() in l['url'].lower()]
+
+# Display links
+if links:
+    for link in links:
+        st.markdown(f"### [{link['title']}]({link['url']})")
+        st.caption(f"Category: {link['category']} | Added on: {link['created_at'][:10]}")
+else:
+    st.info("No links found. Add some in the sidebar!")
