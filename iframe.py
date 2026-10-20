@@ -1,140 +1,90 @@
-import re
-import bs4
-import requests
 import streamlit as st
-from supabase import create_client, Client
+from duckduckgo_search import DDGS
+from supabase import Client, create_client
 
-st.set_page_config(page_title="Ranked Web Search Engine", page_icon="🔍", layout="centered")
+st.set_page_config(
+    page_title="Live Web Search Engine", page_icon="🌐", layout="centered"
+)
 
-# --- Supabase Initialization ---
+
+# --- Supabase Setup ---
 @st.cache_resource
 def init_supabase() -> Client:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+  url = st.secrets["SUPABASE_URL"]
+  key = st.secrets["SUPABASE_KEY"]
+  return create_client(url, key)
+
 
 supabase = init_supabase()
 
-# --- Helper: Web Crawler ---
-def scrape_url(url: str):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    response = requests.get(url, headers=headers, timeout=8)
-    response.raise_for_status()
-    
-    soup = bs4.BeautifulSoup(response.text, "html.parser")
-    for element in soup(["script", "style", "nav", "footer", "header"]):
-        element.decompose()
-        
-    title = soup.title.string.strip() if soup.title else url
-    text = soup.get_text(separator=" ")
-    clean_text = re.sub(r"\s+", " ", text).strip()
-    return title, clean_text[:5000]
-
-# --- Helper: Relevance Ranker ---
-def calculate_relevance_score(item: dict, query_terms: list[str]) -> float:
-    """Calculates a relevance score based on keyword frequency and field weights."""
-    score = 0.0
-    title = (item.get("title") or "").lower()
-    content = (item.get("content") or "").lower()
-    category = (item.get("category") or "").lower()
-
-    for term in query_terms:
-        term_lower = term.lower()
-        # Title matches are weighted highest (3x)
-        score += title.count(term_lower) * 3.0
-        # Category matches weighted 2x
-        score += category.count(term_lower) * 2.0
-        # Main body content matches
-        score += content.count(term_lower) * 1.0
-
-    return score
-
-# --- App UI ---
-st.title("🔍 Ranked Search Engine")
-
-# --- Indexer Sidebar ---
-with st.sidebar:
-    st.header("🕸️ Web Crawler")
-    with st.form("index_form", clear_on_submit=True):
-        target_url = st.text_input("URL to Index", placeholder="https://...")
-        category = st.text_input("Category", placeholder="Tech, News...")
-        submit_crawl = st.form_submit_button("Index Page")
-
-        if submit_crawl and target_url:
-            if not target_url.startswith(("http://", "https://")):
-                target_url = "https://" + target_url
-            try:
-                with st.spinner("Crawling content..."):
-                    page_title, page_content = scrape_url(target_url)
-                    supabase.table("bookmarks").insert({
-                        "title": page_title,
-                        "url": target_url,
-                        "category": category,
-                        "content": page_content
-                    }).execute()
-                st.success(f"Indexed: '{page_title}'")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Crawling failed: {e}")
+st.title("🌐 Live Web Search Engine")
 
 # --- Search Bar ---
-query = st.text_input("Search terms...", placeholder="Enter keywords...")
+query = st.text_input(
+    "Search the web...", placeholder="Type anything (e.g. latest tech news)..."
+)
+max_results = st.slider("Results count", min_value=5, max_value=20, value=10)
 
 if query.strip():
-    query_terms = query.strip().split()
-    formatted_query = " & ".join(query_terms)
-    
-    # Perform Full-Text Search via Supabase FTS index
+  # 1. Log search query to Supabase (optional)
+  try:
+    supabase.table("bookmarks").insert(
+        {"title": f"Search: {query}", "url": f"https://duckduckgo.com/?q={query}", "category": "Search Query"}
+    ).execute()
+  except Exception:
+    pass  # Ignore if schema doesn't match
+
+  # 2. Query the live web
+  with st.spinner(f"Searching the web for '{query}'..."):
     try:
-        response = (
-            supabase.table("bookmarks")
-            .select("*")
-            .text_search("fts", formatted_query)
-            .execute()
-        )
-        raw_results = response.data
-    except Exception:
-        # Fallback if FTS column isn't created yet
-        response = (
-            supabase.table("bookmarks")
-            .select("*")
-            .or_(f"title.ilike.%{query}%,content.ilike.%{query}%")
-            .execute()
-        )
-        raw_results = response.data
+      results = []
+      with DDGS() as ddgs:
+        ddgs_results = ddgs.text(query, max_results=max_results)
+        if ddgs_results:
+          results = list(ddgs_results)
 
-    # Rank results by term frequency score
-    ranked_results = []
-    for item in raw_results:
-        score = calculate_relevance_score(item, query_terms)
-        ranked_results.append((score, item))
-    
-    # Sort descending by relevance score
-    ranked_results.sort(key=lambda x: x[0], reverse=True)
-    results = [item for score, item in ranked_results]
+      if not results:
+        st.warning("No live web results found.")
+      else:
+        st.caption(f"Showing top {len(results)} live results for **{query}**")
+
+        # 3. Display Live Search Results
+        for item in results:
+          with st.container():
+            st.markdown(f"### [{item['title']}]({item['href']})")
+            st.caption(f"🔗 {item['href']}")
+            st.write(item["body"])
+
+            # Save result directly to Supabase as a bookmark
+            col1, col2 = st.columns([5, 1])
+            with col2:
+              if st.button("Bookmark 🔖", key=item["href"]):
+                supabase.table("bookmarks").insert({
+                    "title": item["title"],
+                    "url": item["href"],
+                    "category": "Saved Result",
+                }).execute()
+                st.toast("Saved to Supabase!")
+
+          st.divider()
+
+    except Exception as e:
+      st.error(f"Error fetching live results: {e}")
+
 else:
-    response = supabase.table("bookmarks").select("*").order("created_at", desc=True).limit(10).execute()
-    results = response.data
+  # Display recently saved bookmarks from Supabase when search bar is empty
+  st.subheader("📌 Recently Saved Bookmarks")
+  response = (
+      supabase.table("bookmarks")
+      .select("*")
+      .order("created_at", desc=True)
+      .limit(5)
+      .execute()
+  )
+  saved_items = response.data
 
-st.caption(f"Found {len(results)} ranked result(s)")
-
-# --- Display Results ---
-for item in results:
-    with st.container():
-        st.markdown(f"### [{item['title']}]({item['url']})")
-        st.caption(f"🔗 {item['url']}")
-        
-        content = item.get("content")
-        if content:
-            snippet = content[:250] + "..." if len(content) > 250 else content
-            st.write(snippet)
-            
-        cat = item.get("category") or "General"
-        st.caption(f"🏷️ Category: **{cat}**")
-        
-        col1, col2 = st.columns([6, 1])
-        with col2:
-            if st.button("Delete", key=f"del_{item['id']}"):
-                supabase.table("bookmarks").delete().eq("id", item["id"]).execute()
-                st.rerun()
-    st.divider()
+  if not saved_items:
+    st.info("Type a query above to start searching the live internet.")
+  else:
+    for item in saved_items:
+      st.markdown(f"• [{item['title']}]({item['url']}) — *{item.get('category', 'General')}*")
