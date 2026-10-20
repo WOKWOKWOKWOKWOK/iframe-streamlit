@@ -1,3 +1,5 @@
 streamlit
 supabase
 googlesearch-python
+requests
+beautifulsoup4
